@@ -1,0 +1,22 @@
+{
+  "ble": {
+    "esp32_name": "DriveESP32",
+    "notify_uuid": "0000xxxx-0000-1000-8000-00805f9b34fb",
+    "pref_rssi": -70
+  },
+  "serial": {
+    "ref_ecg_port": "/dev/ttyUSB0",
+    "baudrate": 115200
+  },
+  "storage": {
+    "data_dir": "sessions",
+    "flush_interval_sec": 2
+  },
+  "prompt": {
+    "interval_sec": 300,
+    "tts_enabled": true
+  },
+  "simulate": {
+    "enabled": true
+  }
+}
