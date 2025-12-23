@@ -1,0 +1,285 @@
+import serial
+
+import numpy as np
+
+import pyqtgraph as pg
+
+from pyqtgraph.Qt import QtCore, QtWidgets
+
+import collections
+
+import time
+
+import csv
+
+import sys
+
+from datetime import datetime
+
+
+
+# --- CONFIGURATION (MUST MATCH ESP32) ---
+
+SERIAL_PORT = '/dev/ttyUSB0'  # CHECK: Verify this port on your Ubuntu system
+
+BAUD_RATE = 115200          # MUST MATCH ESP32 Serial.begin() speed
+
+MAX_POINTS = 500            # Number of data points (samples) to display in the window
+
+UPDATE_INTERVAL_MS = 20     # Plot update rate (50 times per second)
+
+OUTLIER_THRESHOLD = 3800    # Max valid ADC value (4095 is max)
+
+MIN_THRESHOLD = 200         # Min valid ADC value (0 is min)
+
+
+
+# --- FILE LOGGING SETUP ---
+
+# Create a unique filename using a timestamp
+
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+FILE_NAME = f"hand2_{timestamp}.csv"
+
+CSV_FILE = None
+
+CSV_WRITER = None
+
+
+
+# --- GLOBAL DATA BUFFERS ---
+
+raw_data = collections.deque(np.zeros(MAX_POINTS), maxlen=MAX_POINTS)
+
+filtered_data = collections.deque(np.zeros(MAX_POINTS), maxlen=MAX_POINTS)
+
+ma_buffer = collections.deque(np.zeros(5), maxlen=5)
+
+
+
+def moving_average_filter(new_val):
+
+    """Applies a simple moving average filter."""
+
+    ma_buffer.append(new_val)
+
+    return sum(ma_buffer) / len(ma_buffer)
+
+
+
+
+
+# --- 1. INITIALIZATION AND FILE OPENING ---
+
+
+
+try:
+
+    # Open the serial port
+
+    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.01)
+
+    print(f"Connected to {SERIAL_PORT} at {BAUD_RATE} baud.")
+
+    
+
+    # Open the CSV file for writing
+
+    CSV_FILE = open(FILE_NAME, 'w', newline='')
+
+    CSV_WRITER = csv.writer(CSV_FILE)
+
+    
+
+    # Write the header row: Timestamp, Raw ADC Value, Sample Index
+
+    CSV_WRITER.writerow(['Timestamp_ms', 'Raw_ADC_Value'])
+
+    print(f"Logging data to {FILE_NAME}")
+
+    
+
+except serial.SerialException as e:
+
+    print(f"Error: Could not open serial port {SERIAL_PORT}: {e}")
+
+    sys.exit(1)
+
+except Exception as e:
+
+    print(f"An unexpected error occurred during setup: {e}")
+
+    if CSV_FILE:
+
+        CSV_FILE.close()
+
+    sys.exit(1)
+
+
+
+
+
+# --- 2. PLOTTING SETUP (PyQtGraph) ---
+
+app = pg.mkQApp("RealTime ECG Plotter")
+
+win = pg.GraphicsLayoutWidget(title="Real-Time Processed ECG Signal")
+
+win.show()
+
+
+
+# Setup plots and curves (as before)
+
+raw_plot = win.addPlot(row=0, col=0, title="Raw Input (Logged Data)")
+
+raw_curve = raw_plot.plot()
+
+raw_plot.setYRange(0, 4095)
+
+filtered_plot = win.addPlot(row=1, col=0, title="Filtered Signal (Visualization)")
+
+filtered_curve = filtered_plot.plot(pen='y')
+
+filtered_plot.setYRange(1500, 2500)
+
+
+
+
+
+# --- 3. THE CORE UPDATE AND LOGGING LOOP ---
+
+
+
+def update_plot():
+
+    """Reads serial data, logs it, processes it, and updates plots."""
+
+    global raw_data, filtered_data
+
+    
+
+    current_time_ms = time.time() * 1000 # Milliseconds for logging
+
+    
+
+    # Read available data in bulk
+
+    while ser.in_waiting > 0:
+
+        try:
+
+            line_str = ser.readline().decode('utf-8').strip()
+
+            
+
+            # --- Attempt Conversion and Handle Errors ---
+
+            if line_str == "-1":
+
+                value = 2048 # Midpoint placeholder for LOD fault
+
+            else:
+
+                value = int(line_str)
+
+            
+
+            # 1. OUTLIER CHECK
+
+            if value > OUTLIER_THRESHOLD or value < MIN_THRESHOLD:
+
+                # Replace extreme outliers (saturation) with the last good value or midpoint
+
+                value = raw_data[-1] if len(raw_data) > 0 else 2048
+
+            
+
+            # 2. LOG RAW DATA TO FILE (This is the new feature)
+
+            CSV_WRITER.writerow([int(current_time_ms), value])
+
+            
+
+            # 3. APPEND RAW DATA FOR PLOT
+
+            raw_data.append(value)
+
+            
+
+            # 4. PROCESS SIGNAL (MAF demonstration)
+
+            cleaned_value = moving_average_filter(value)
+
+            filtered_data.append(cleaned_value)
+
+            
+
+        except (ValueError, UnicodeDecodeError):
+
+            continue # Skip corrupted lines
+
+        except IndexError:
+
+            continue
+
+        except Exception as e:
+
+            print(f"Error during data processing: {e}")
+
+            continue
+
+
+
+    # 5. UPDATE PLOTS
+
+    raw_curve.setData(np.array(raw_data))
+
+    filtered_curve.setData(np.array(filtered_data))
+
+    filtered_plot.enableAutoRange('y', True)
+
+
+
+
+
+# --- 4. EXECUTION AND CLEANUP ---
+
+
+
+# Set up the QTimer to call the update function repeatedly
+
+timer = QtCore.QTimer()
+
+timer.timeout.connect(update_plot)
+
+timer.start(UPDATE_INTERVAL_MS)
+
+
+
+if __name__ == '__main__':
+
+    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+
+        try:
+
+            pg.exec()
+
+        except Exception:
+
+            pass # Ignore errors on exit
+
+
+
+        # --- FINAL CLEANUP ---
+
+        if ser and ser.is_open:
+
+            ser.close()
+
+        if CSV_FILE:
+
+            CSV_FILE.close()
+
+            print(f"\nData logging successfully ended. File saved: {FILE_NAME}")

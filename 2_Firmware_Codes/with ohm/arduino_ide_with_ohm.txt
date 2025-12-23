@@ -1,0 +1,97 @@
+// --- PIN DEFINITIONS ---
+
+const int ECG_OUT_PIN = 36; // AD8232 OUTPUT connected to ESP32 VP (GPIO 36/ADC1_CH0)
+
+const int LO_PLUS_PIN = 2;  // AD8232 LO+ connected to GPIO 2 (D2)
+
+const int LO_MINUS_PIN = 4; // AD8232 LO- connected to GPIO 4 (D4)
+
+
+
+// --- SAMPLING PARAMETERS ---
+
+// Set for a consistent rate (e.g., 500 Hz for high fidelity)
+
+const long SAMPLE_PERIOD_US = 2000; // 2000 microseconds = 2 milliseconds (500 Hz)
+
+
+
+void setup() {
+
+  Serial.begin(115200);
+
+  Serial.println("Starting AD8232 ECG Acquisition...");
+
+
+
+  // Configure Leads-Off pins as inputs
+
+  pinMode(LO_PLUS_PIN, INPUT);
+
+  pinMode(LO_MINUS_PIN, INPUT);
+
+  pinMode(ECG_OUT_PIN, INPUT); // Set ADC pin as input
+
+
+
+  // Set ADC properties (optional, but good for consistency)
+
+  analogReadResolution(12); // Use 12-bit resolution (0-4095)
+
+}
+
+
+
+void loop() {
+
+  static unsigned long last_sample_time = micros();
+
+  unsigned long current_time = micros();
+
+
+
+  // --- Timing: Maintain consistent sampling rate ---
+
+  if (current_time - last_sample_time >= SAMPLE_PERIOD_US) {
+
+    last_sample_time = current_time;
+
+
+
+    // --- Leads-Off Check: Verify Connection Status ---
+
+    // LO+ and LO- are typically LOW when all 3 electrodes are attached.
+
+    if (digitalRead(LO_PLUS_PIN) == HIGH || digitalRead(LO_MINUS_PIN) == HIGH) {
+
+      // CONNECTION FAULT: One or more leads are off.
+
+      // Print a unique error value (-1) to signal the Python script to pause.
+
+      Serial.println("-1"); 
+
+      // The AD8232's internal circuit is likely outputting 0 or VCC, but
+
+      // we report the fault code to the PC for proper handling.
+
+
+
+    } else {
+
+      // CONNECTION GOOD: Read and Transmit ECG Signal
+
+      int ecgValue = analogRead(ECG_OUT_PIN);
+
+      
+
+      // Print the raw ADC value
+
+      Serial.println(ecgValue);
+
+    }
+
+  }
+
+}
+
+
