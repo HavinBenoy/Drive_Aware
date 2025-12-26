@@ -1,7 +1,7 @@
 # session_manager.py
 from storage import Storage
 from utils import new_session_id
-import json
+import numpy as np
 
 class SessionManager:
     def __init__(self, storage_base="sessions", flush_interval=2):
@@ -15,7 +15,6 @@ class SessionManager:
         return sid, filepath
 
     def append_sample(self, device_name, ts, value):
-        import numpy as np
         self.storage.append(device_name, np.array([ts], dtype='f8'), np.array([value], dtype='f4'))
 
     def end(self):

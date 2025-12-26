@@ -10,6 +10,11 @@ class SerialClient:
         self.on_packet = on_packet
         self._stop = False
         self._thread = None
+        self.is_connected = False
+        self.last_packet_time = None
+        self.packet_count = 0
+        self.on_status_change = None
+
 
     def start(self):
         self._stop = False
@@ -25,7 +30,9 @@ class SerialClient:
         while not self._stop:
             try:
                 with serial.Serial(self.port, self.baudrate, timeout=1) as ser:
-                    print("Serial connected", self.port)
+                    self.is_connected = True
+                    if self.on_status_change:
+                        self.on_status_change({"device":"ref_ecg","connected":True})
                     while not self._stop:
                         line = ser.readline().decode(errors='ignore').strip()
                         if not line:
@@ -44,8 +51,14 @@ class SerialClient:
                         else:
                             value = float(parts[0])
                             pkt = {"device":"ref_ecg","src_ts": None, "host_ts": time.time(), "value": value}
+                        self.last_packet_time = time.time()
+                        self.packet_count += 1
                         if self.on_packet:
                             self.on_packet(pkt)
             except Exception as e:
                 print("Serial error:", e)
+                self.is_connected = False
+                if self.on_status_change:
+                    self.on_status_change({"device":"ref_ecg","connected":False})
+                
                 time.sleep(2)

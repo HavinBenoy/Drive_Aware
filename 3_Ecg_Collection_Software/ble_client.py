@@ -12,6 +12,11 @@ class BLEClient:
         self._stop = False
         self._thread = None
         self._address = None
+        # Initial scanning and state
+        self.is_connected = False
+        self.last_packet_time = None
+        self.packet_count = 0
+        self.on_status_change = None
 
     def start(self):
         self._stop = False
@@ -42,13 +47,17 @@ class BLEClient:
                     continue
                 self._address = device.address
                 async with BleakClient(self._address) as client:
-                    print("BLE connected:", self._address)
+                    self.is_connected = True
+                    if self.on_status_change:
+                        self.on_status_change({"device":"ble_esp","connected":True})
                     await client.start_notify(self.notify_uuid, self._handle_notification)
                     while not self._stop:
                         await asyncio.sleep(1)
                     await client.stop_notify(self.notify_uuid)
             except Exception as e:
                 print("BLE error:", e)
+                if self.on_status_change:
+                    self.on_status_change({"device":"ble_esp","connected":False})
                 await asyncio.sleep(2.0)
 
     def _handle_notification(self, sender, data: bytearray):
@@ -72,6 +81,8 @@ class BLEClient:
                 # fallback parse as single numeric sample
                 value = float(s)
                 pkt = {"device":"ble_esp","src_ts": None, "host_ts": time.time(), "value": value}
+            self.last_packet_time = time.time()
+            self.packet_count += 1
             if self.on_packet:
                 self.on_packet(pkt)
         except Exception as e:
